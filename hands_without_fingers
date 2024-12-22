@@ -1,0 +1,134 @@
+import cv2
+import mediapipe as mp
+from controller import Robot, Keyboard, Motion
+
+class Nao(Robot):
+    def __init__(self):
+        Robot.__init__(self)
+        self.findAndEnableDevices()  # Setup necessary robot devices
+        self.loadMotionFiles()  # Load motion files (even though we're not using them here)
+
+        # Initialize Mediapipe for pose tracking (no hand tracking needed)
+        self.mp_pose = mp.solutions.pose
+        self.pose = self.mp_pose.Pose(min_detection_confidence=0.7, min_tracking_confidence=0.7)
+        self.mp_draw = mp.solutions.drawing_utils
+        self.cap = cv2.VideoCapture(0)
+
+    def loadMotionFiles(self):
+        # If you need motions for future use, leave them here; otherwise, you can remove them
+        self.forwards = Motion('../../motions/Forwards50.motion')
+        self.backwards = Motion('../../motions/Backwards.motion')
+        self.sideStepLeft = Motion('../../motions/SideStepLeft.motion')
+        self.sideStepRight = Motion('../../motions/SideStepRight.motion')
+        self.turnLeft60 = Motion('../../motions/TurnLeft60.motion')
+        self.turnRight60 = Motion('../../motions/TurnRight60.motion')
+        self.taiChi = Motion('../../motions/TaiChi.motion')
+        self.wipeForhead = Motion('../../motions/WipeForehead.motion')
+
+    def findAndEnableDevices(self):
+        self.timeStep = int(self.getBasicTimeStep())
+        
+        # Enable necessary devices (camera and keyboard for this task)
+        self.cameraTop = self.getDevice("CameraTop")
+        self.cameraTop.enable(4 * self.timeStep)
+        self.keyboard = self.getKeyboard()
+        self.keyboard.enable(10 * self.timeStep)
+
+        # Enable motors for shoulder control
+        self.RShoulderPitch = self.getDevice("RShoulderPitch")
+        self.LShoulderPitch = self.getDevice("LShoulderPitch")
+        self.RHipPitch = self.getDevice("RHipPitch")
+        self.LHipPitch = self.getDevice("LHipPitch")
+        self.RElbowRoll = self.getDevice("RElbowRoll")
+        self.LElbowRoll = self.getDevice("LElbowRoll")
+        self.RElbowYaw = self.getDevice("RElbowYaw")
+        self.LElbowYaw = self.getDevice("LElbowYaw")
+        self.RShoulderRoll = self.getDevice("RShoulderRoll")
+        self.LShoulderRoll = self.getDevice("LShoulderRoll")
+        self.RWristYaw = self.getDevice("RWristYaw")
+        self.LWristYaw = self.getDevice("LWristYaw")
+        
+    def setNeutralArmPositions(self):
+        # Set the shoulders to their neutral (resting) position
+        self.RShoulderPitch.setPosition(0)  # Neutral position for right shoulder
+        self.LShoulderPitch.setPosition(0)  # Neutral position for left shoulder
+        self.RElbowRoll.setPosition(0)
+        self.LElbowRoll.setPosition(0)
+        self.RElbowYaw.setPosition(0)
+        self.LElbowYaw.setPosition(0)
+        self.RShoulderRoll.setPosition(0)
+        self.LShoulderRoll.setPosition(0)
+        self.RWristYaw.setPosition(0)
+        self.LWristYaw.setPosition(0)
+
+    def detectPoseGestures(self):
+        ret, frame = self.cap.read()
+        if not ret:
+            return
+    
+        frame = cv2.flip(frame, 1)  # Mirror the frame horizontally
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        result_pose = self.pose.process(frame_rgb)
+    
+        if result_pose.pose_landmarks:
+            # Right shoulder, elbow, and wrist landmarks (for right arm control)
+            right_shoulder = result_pose.pose_landmarks.landmark[self.mp_pose.PoseLandmark.RIGHT_SHOULDER]
+            right_elbow = result_pose.pose_landmarks.landmark[self.mp_pose.PoseLandmark.RIGHT_ELBOW]
+            right_wrist = result_pose.pose_landmarks.landmark[self.mp_pose.PoseLandmark.RIGHT_WRIST]
+            
+            # Left shoulder, elbow, and wrist landmarks (for left arm control)
+            left_shoulder = result_pose.pose_landmarks.landmark[self.mp_pose.PoseLandmark.LEFT_SHOULDER]
+            left_elbow = result_pose.pose_landmarks.landmark[self.mp_pose.PoseLandmark.LEFT_ELBOW]
+            left_wrist = result_pose.pose_landmarks.landmark[self.mp_pose.PoseLandmark.LEFT_WRIST]
+            
+            # Calculating joint angles for right arm (mapping from pose to joint control)
+            self.updateArmJoints(right_shoulder, right_elbow, right_wrist, 
+                                 self.LShoulderPitch, self.LElbowRoll, self.LElbowYaw, 
+                                 self.LShoulderRoll, self.LWristYaw)
+
+            # Calculating joint angles for left arm (mapping from pose to joint control)
+            self.updateArmJoints(left_shoulder, left_elbow, left_wrist, 
+                                 self.RShoulderPitch, self.RElbowRoll, self.RElbowYaw, 
+                                 self.RShoulderRoll, self.RWristYaw)
+        # self.mp_draw.draw_landmarks(frame, hand_landmarks, self.mp_hands.HAND_CONNECTIONS)
+            
+        cv2.imshow('Pose Tracking', frame)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            self.cap.release()
+            cv2.destroyAllWindows()
+
+    def updateArmJoints(self, shoulder, elbow, wrist, 
+                        shoulder_pitch, elbow_roll, elbow_yaw, shoulder_roll, wrist_yaw):
+        # Calculate angles for each joint based on the shoulder, elbow, and wrist positions
+        
+        # Shoulder pitch (arm up and down)
+        shoulder_angle = (wrist.y - shoulder.y) * 3  # Scaling factor
+        shoulder_pitch.setPosition(max(min(shoulder_angle, shoulder_pitch.getMaxPosition()), shoulder_pitch.getMinPosition()))
+        
+        # Elbow roll (elbow rotation)
+        elbow_roll_angle = (elbow.x - wrist.x) * 3  # Scaling factor
+        elbow_roll.setPosition(max(min(elbow_roll_angle, elbow_roll.getMaxPosition()), elbow_roll.getMinPosition()))
+        
+        # Elbow yaw (elbow bending)
+        # elbow_yaw_angle = (wrist.x - elbow.x) * 3  # Scaling factor
+        # elbow_yaw.setPosition(max(min(elbow_yaw_angle, elbow_yaw.getMaxPosition()), elbow_yaw.getMinPosition()))
+        
+        # Shoulder roll (shoulder rotation)
+        shoulder_roll_angle = (shoulder.x - wrist.x) * 3  # Scaling factor
+        shoulder_roll.setPosition(max(min(shoulder_roll_angle, shoulder_roll.getMaxPosition()), shoulder_roll.getMinPosition()))
+        
+        # Wrist yaw (wrist rotation)
+        # wrist_yaw_angle = (wrist.x - elbow.x) * 3  # Scaling factor
+        # wrist_yaw.setPosition(max(min(wrist_yaw_angle, wrist_yaw.getMaxPosition()), wrist_yaw.getMinPosition()))
+        
+    def run(self):
+        while robot.step(self.timeStep) != -1:
+            self.detectPoseGestures()  # Continuously check for pose gestures
+            key = self.keyboard.getKey()
+            if key > 0:
+                break
+
+# Create the Robot instance and run the main loop
+robot = Nao()
+robot.setNeutralArmPositions()
+robot.run()
