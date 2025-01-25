@@ -74,7 +74,7 @@ class Nao(Robot):
         self.HeadYaw = self.getDevice("HeadYaw")  # Horizontal head rotation
         self.HeadPitch = self.getDevice("HeadPitch")  # Vertical head rotation
 
-    def setNeutralArmPositions(self):
+    def setNeutralPositions(self):
         # Set the shoulders to their neutral (resting) position
         self.RShoulderPitch.setPosition(0)
         self.LShoulderPitch.setPosition(0)
@@ -309,7 +309,6 @@ def perform_stop():
 
 def perform_stand():
     stop_event.set()
-    print(stop_event.is_set())
     stand = Motion('../../motions/StandUpFromFront.motion') 
     counter_stand = 0
     while(robot.step(robot.timeStep) != -1 and counter_stand != 110):
